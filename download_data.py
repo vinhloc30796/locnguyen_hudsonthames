@@ -5,7 +5,7 @@ import yfinance as yf
 import requests
 from datetime import datetime
 
-def get_sp500_tickers(filename='../data/sp500_tickers.txt'):
+def get_sp500_tickers(filename='./data/sp500_tickers.txt'):
     """Download S&P500 tickers
     
     :param filename: str e.g. 'pricing.csv'
@@ -45,15 +45,15 @@ class StockUniverse:
         self.end = pd.Timestamp(end)
         # Download the data
         tickers_str = ' '.join(tickers)
-        self.df = yf.download(tickers_str, start=start, end=end)
-        return self.df
+        self.prices_df = yf.download(tickers_str, start=start, end=end)
+        return self.prices_df
     
     def store_pickle(
         self, 
-        filename=f'../data/tickers_{datetime.today().strftime("%Y-%m-%d")}.pkl',
+        filename=f'./data/tickers_{datetime.today().strftime("%Y-%m-%d")}.pkl',
         indicator_select=['A','O','H','L','C','V']
     ):
-        """Store self.df into a local pickle file
+        """Store self.prices_df into a local pickle file
         
         :param filename: str e.g. 'pricing.pkl'
         :param indicator_select: list of str - which indicator(s) to save in the csv
@@ -68,7 +68,7 @@ class StockUniverse:
             self.indicator_translation[each_selection] 
             for each_selection in indicator_select
         ]
-        df_to_save = self.df.loc[:, indicator_columns]
+        df_to_save = self.prices_df.loc[:, indicator_columns]
         # Save to local
         df_to_save.to_pickle(self.filename)
         print(f'Saved file successfully at {self.filename}')
@@ -76,49 +76,49 @@ class StockUniverse:
     
     def read_pickle(
         self,
-        filename=f'../data/tickers_{datetime.today().strftime("%Y-%m-%d")}.pkl',
+        filename=f'./data/tickers_{datetime.today().strftime("%Y-%m-%d")}.pkl',
         update_characteristics=True
     ):
-        """Read a local pickle file into self.df
+        """Read a local pickle file into self.prices_df
         
         :param filename: str e.g. 'pricing.pkl'
-        :return self.df
+        :return self.prices_df
         """
         # Read pickle
         self.filename = filename
-        self.df = pd.read_pickle(filename)
+        self.prices_df = pd.read_pickle(filename)
         # Update characteristics if necessary
         if update_characteristics:
-            self.tickers = self.df.columns.get_level_values(1) # Assumes that self.df.columns is MultiIndex
-            self.start, self.end = self.df.index[[0,-1]] # Get start and end time
-        return self.df
+            self.tickers = self.prices_df.columns.get_level_values(1) # Assumes that self.prices_df.columns is MultiIndex
+            self.start, self.end = self.prices_df.index[[0,-1]] # Get start and end time
+        return self.prices_df
 
     def calc_normalized_returns(
         self,
         indicator_select=['A','O','H','L','C','V']
     ):
-        """Read a local pickle file into self.df
+        """Read a local pickle file into self.prices_df
         
         :param :param indicator_select: list of str - which indicator(s) 
             to calculate returns for.
             Possible strings are:
             A: Adj Close; O: Open; C: Close;
             H: High; L: Low, V: Volume
-        :return self.df with the normalized returns
-        accessible through e.g. self.df['Adj Close Returns']
+        :return self.returns_df with the normalized returns
+        accessible through e.g. self.returns_df['Adj Close Returns']
         """
         # Select indicator(s) to save in the csv
         indicator_columns = [
             self.indicator_translation[each_selection] 
             for each_selection in indicator_select
         ]
-        # Filter self.df on indicator_columns
-        df_to_calc = self.df.loc[:, indicator_columns]
+        # Filter self.prices_df on indicator_columns
+        df_to_calc = self.prices_df.loc[:, indicator_columns]
         # Calculate the returns
         returns_df = (df_to_calc - df_to_calc.shift())/(df_to_calc.shift())
         # Build new index and column names
         indicator_names = [
-            each_indicator_name + ' Returns'
+            each_indicator_name
             for each_indicator_name 
             in df_to_calc.columns.get_level_values(0).unique()
         ]
@@ -134,6 +134,32 @@ class StockUniverse:
             )
         )
         return self.returns_df
+
+    def preprocess_returns_df(self, nathreshold_ticker=0.25):
+        """Deal with nulls in self.returns_df
+        
+        :return self.clean_df: the cleaned version (without nulls) of self.returns_df
+        accessible through e.g. self.prices_df['Adj Close Returns']"""
+        # Drop tickers with major gap in data
+        tickers_nacount = self.returns_df.isnull().sum(axis='index')
+        tickers_to_drop = tickers_nacount[tickers_nacount >= len(self.returns_df.index) * nathreshold_ticker]
+        print(f'Dropping tickers: {tickers_to_drop.index.values}.')
+        print(f'More than {nathreshold_ticker*100.00:0.2f}% missing!\n')
+        self.clean_df = self.returns_df.dropna(axis='columns', thresh=len(self.returns_df.index)*(1-nathreshold_ticker))
+        # Forward-fill datetime with gaps in data
+        self.clean_df.fillna(method='ffill', inplace=True)
+        # Drop the first few dates that can't be forward-filled
+        self.clean_df.dropna(axis='index', how='all', inplace=True)
+        # Drop the tickers that don't start trading as the rest
+        first_date = self.clean_df.index[0]
+        tickers_first_date = self.clean_df.apply(pd.Series.first_valid_index)
+        tickers_to_drop = tickers_first_date[tickers_first_date != first_date].index.values
+        print(f'Dropping tickers: {tickers_to_drop}.')
+        print(f'Started trading after {first_date.strftime("%Y-%m-%d")}!\n')
+        self.clean_df = self.clean_df.drop(columns=tickers_to_drop)
+        # Print
+        print(f'Preprocessing done. Count of nulls after cleaning: {sum(self.clean_df.isnull().sum() != 0)}')
+        return self.clean_df
 
 if __name__ == "__main__":
     # Main
