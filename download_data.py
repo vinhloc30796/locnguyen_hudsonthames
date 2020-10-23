@@ -27,10 +27,9 @@ class StockUniverse:
     
     def download_data(self, tickers, start="2017-01-01", end="2020-10-23"):
         """Using yfinance to download pricing data
-        then save as CSV
         
         :param tickers: list of strings e.g. ['AAPL', 'MSFT', etc.]
-        :return data
+        :return 
         """
         # Store characteristics
         self.tickers = tickers
@@ -39,7 +38,7 @@ class StockUniverse:
         # Download the data
         tickers_str = ' '.join(tickers)
         self.df = yf.download(tickers_str, start=start, end=end)
-        return None
+        return self.df
     
     def store_pickle(
         self, 
